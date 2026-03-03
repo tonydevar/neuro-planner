@@ -1,0 +1,7 @@
+fastapi[all]
+sqlalchemy
+aiosqlite
+openai
+python-dotenv
+alembic
+uvicorn

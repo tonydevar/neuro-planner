@@ -1,19 +1,33 @@
+import { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { useTask, useUpdateTask, useDeleteTask, useEstimateTask, useGenerateSubtasks } from '@/hooks';
+import {
+  useTask,
+  useCreateTask,
+  useUpdateTask,
+  useDeleteTask,
+  useEstimateTask,
+  useGenerateSubtasks,
+} from '@/hooks';
 import { PriorityBadge } from '@/components/PriorityBadge';
 import { CategoryBadge } from '@/components/CategoryBadge';
 import { StatusToggle } from '@/components/StatusToggle';
 import type { TaskStatus } from '@/types';
-import { ArrowLeft, Loader2, Trash2, Sparkles, GitBranch } from 'lucide-react';
+import { ArrowLeft, Loader2, Trash2, Sparkles, GitBranch, Plus } from 'lucide-react';
 
 export function TaskDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { data: task, isLoading, error } = useTask(id);
+  const createTask = useCreateTask();
   const updateTask = useUpdateTask();
   const deleteTask = useDeleteTask();
   const estimateTask = useEstimateTask();
   const generateSubtasks = useGenerateSubtasks();
+
+  // Manual sub-task form state
+  const [showSubtaskForm, setShowSubtaskForm] = useState(false);
+  const [subtaskName, setSubtaskName] = useState('');
+  const [subtaskDesc, setSubtaskDesc] = useState('');
 
   if (isLoading) {
     return (
@@ -38,7 +52,7 @@ export function TaskDetailPage() {
   };
 
   const handleDelete = () => {
-    if (confirm('Delete this task?')) {
+    if (confirm('Archive this task? (It will no longer appear in the task list.)')) {
       deleteTask.mutate(task.id, { onSuccess: () => navigate('/tasks') });
     }
   };
@@ -49,6 +63,27 @@ export function TaskDetailPage() {
 
   const handleGenerateSubtasks = () => {
     generateSubtasks.mutate(task.id);
+  };
+
+  const handleAddSubtask = () => {
+    if (!subtaskName.trim()) return;
+    createTask.mutate(
+      {
+        name: subtaskName.trim(),
+        description: subtaskDesc.trim(),
+        parent_task_id: task.id,
+        category: task.category,
+        priority: task.priority,
+        mission_id: task.mission_id ?? undefined,
+      },
+      {
+        onSuccess: () => {
+          setSubtaskName('');
+          setSubtaskDesc('');
+          setShowSubtaskForm(false);
+        },
+      }
+    );
   };
 
   return (
@@ -80,7 +115,7 @@ export function TaskDetailPage() {
           <button
             onClick={handleDelete}
             className="p-2 text-gray-400 hover:text-red-600 transition-colors"
-            title="Delete task"
+            title="Archive task"
           >
             <Trash2 className="w-4 h-4" />
           </button>
@@ -129,11 +164,70 @@ export function TaskDetailPage() {
           </div>
         )}
 
-        {task.subtasks.length > 0 && (
-          <div className="mt-6">
-            <h3 className="text-sm font-medium text-gray-900 mb-3">
-              Subtasks ({task.subtasks.filter((s) => s.status === 'done').length}/{task.subtasks.length})
+        {/* Sub-tasks section */}
+        <div className="mt-6">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-sm font-medium text-gray-900">
+              Subtasks
+              {task.subtasks.length > 0 && (
+                <span className="text-gray-400 font-normal ml-1">
+                  ({task.subtasks.filter((s) => s.status === 'done').length}/{task.subtasks.length} done)
+                </span>
+              )}
             </h3>
+            <button
+              onClick={() => setShowSubtaskForm((v) => !v)}
+              className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-800 transition-colors"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              Add manually
+            </button>
+          </div>
+
+          {/* Manual sub-task form */}
+          {showSubtaskForm && (
+            <div className="mb-3 p-3 bg-blue-50 rounded-md border border-blue-100">
+              <div className="space-y-2">
+                <input
+                  type="text"
+                  placeholder="Subtask name *"
+                  value={subtaskName}
+                  onChange={(e) => setSubtaskName(e.target.value)}
+                  className="w-full px-3 py-1.5 border rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-blue-400"
+                  onKeyDown={(e) => e.key === 'Enter' && handleAddSubtask()}
+                />
+                <input
+                  type="text"
+                  placeholder="Description (optional)"
+                  value={subtaskDesc}
+                  onChange={(e) => setSubtaskDesc(e.target.value)}
+                  className="w-full px-3 py-1.5 border rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-blue-400"
+                  onKeyDown={(e) => e.key === 'Enter' && handleAddSubtask()}
+                />
+                <div className="flex gap-2">
+                  <button
+                    onClick={handleAddSubtask}
+                    disabled={!subtaskName.trim() || createTask.isPending}
+                    className="px-3 py-1 bg-blue-600 text-white rounded text-xs hover:bg-blue-700 disabled:opacity-50 transition-colors"
+                  >
+                    {createTask.isPending ? 'Adding...' : 'Add subtask'}
+                  </button>
+                  <button
+                    onClick={() => {
+                      setShowSubtaskForm(false);
+                      setSubtaskName('');
+                      setSubtaskDesc('');
+                    }}
+                    className="px-3 py-1 text-gray-500 rounded text-xs hover:text-gray-700 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {task.subtasks.length > 0 ? (
             <div className="space-y-2">
               {task.subtasks.map((sub) => (
                 <div key={sub.id} className="flex items-start gap-3 p-3 bg-gray-50 rounded-md">
@@ -152,12 +246,20 @@ export function TaskDetailPage() {
                 </div>
               ))}
             </div>
-          </div>
-        )}
+          ) : (
+            !showSubtaskForm && (
+              <p className="text-xs text-gray-400 italic">
+                No subtasks yet. Use "AI Estimate" or "Generate Subtasks" to auto-generate, or add one manually.
+              </p>
+            )
+          )}
+        </div>
 
         <div className="mt-6 pt-4 border-t text-xs text-gray-400">
-          Created: {new Date(task.created_at).toLocaleString()}
-          {task.updated_at && <> &middot; Updated: {new Date(task.updated_at).toLocaleString()}</>}
+          Created: {task.created_at ? new Date(task.created_at).toLocaleString() : '—'}
+          {task.updated_at && (
+            <> &middot; Updated: {new Date(task.updated_at).toLocaleString()}</>
+          )}
         </div>
       </div>
     </div>

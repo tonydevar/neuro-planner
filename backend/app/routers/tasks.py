@@ -16,11 +16,14 @@ async def list_tasks(
     mission_id: str | None = None,
     db: AsyncSession = Depends(get_db),
 ):
+    # Exclude archived tasks by default unless explicitly requested
     query = select(Task).where(Task.parent_task_id.is_(None))
-    if category:
-        query = query.where(Task.category == category)
     if status:
         query = query.where(Task.status == status)
+    else:
+        query = query.where(Task.status != "archived")
+    if category:
+        query = query.where(Task.category == category)
     if mission_id:
         query = query.where(Task.mission_id == mission_id)
     query = query.order_by(Task.created_at.desc())
@@ -63,13 +66,19 @@ async def update_task(
 
 @router.delete("/{task_id}", status_code=204)
 async def delete_task(task_id: str, db: AsyncSession = Depends(get_db)):
+    """Soft-delete: sets task status to 'archived'. Subtasks are also archived."""
     result = await db.execute(select(Task).where(Task.id == task_id))
     task = result.scalar_one_or_none()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
-    # Delete subtasks first
-    await db.execute(delete(Task).where(Task.parent_task_id == task_id))
-    await db.delete(task)
+    # Soft-delete subtasks
+    subtask_result = await db.execute(
+        select(Task).where(Task.parent_task_id == task_id)
+    )
+    for sub in subtask_result.scalars().all():
+        sub.status = "archived"
+    # Soft-delete the task itself
+    task.status = "archived"
     await db.commit()
 
 
@@ -83,12 +92,12 @@ async def estimate_task(task_id: str, db: AsyncSession = Depends(get_db)):
     llm_result = await llm.estimate_task(task.name, task.description)
 
     task.estimated_mins = llm_result.get("estimated_minutes", 30)
-    # Delete old subtasks
+    # Delete old subtasks (hard delete is fine here — they're being replaced)
     await db.execute(delete(Task).where(Task.parent_task_id == task_id))
     # Create new subtasks
     for st in llm_result.get("subtasks", []):
         sub = Task(
-            name=st["name"],
+            name=st.get("name", "Unnamed subtask"),
             description=st.get("description", ""),
             parent_task_id=task_id,
             category=task.category,
@@ -113,7 +122,7 @@ async def generate_subtasks(task_id: str, db: AsyncSession = Depends(get_db)):
     new_subtasks = []
     for st in subtask_defs:
         sub = Task(
-            name=st["name"],
+            name=st.get("name", "Unnamed subtask"),
             description=st.get("description", ""),
             parent_task_id=task_id,
             category=task.category,

@@ -7,6 +7,17 @@ PRIORITY_MAP = {"urgent": 4, "high": 3, "medium": 2, "low": 1}
 
 
 async def build_schedule(date_str: str, session: AsyncSession) -> list[ScheduleSlot]:
+    """Build a daily schedule for the given date.
+
+    Args:
+        date_str: ISO date string (YYYY-MM-DD) for the day to schedule.
+                  Currently used as a key for the response but task filtering
+                  is based on status (todo/in_progress), not due dates.
+                  Per-day task scheduling (due dates) is a v2 feature.
+        session: Async SQLAlchemy session.
+    """
+    _ = date_str  # reserved for future per-day task filtering
+
     # 1. Load category configs
     result = await session.execute(select(CategoryDayConfig))
     configs = {c.category: c.allotted_mins for c in result.scalars().all()}

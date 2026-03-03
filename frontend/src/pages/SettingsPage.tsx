@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useCategoryConfig, useUpdateCategoryConfig } from '@/hooks';
 import { CATEGORY_EMOJI } from '@/api/client';
 import type { CategoryConfig } from '@/types';
@@ -7,25 +7,32 @@ import { Loader2, Save } from 'lucide-react';
 export function SettingsPage() {
   const { data: configs, isLoading, error } = useCategoryConfig();
   const updateConfig = useUpdateCategoryConfig();
-  const [localConfigs, setLocalConfigs] = useState<CategoryConfig[]>([]);
 
-  useEffect(() => {
-    if (configs) {
-      setLocalConfigs(configs);
-    }
-  }, [configs]);
+  // Track unsaved edits as an overlay on top of server state.
+  // Key: category name, Value: edited allotted_mins.
+  const [edits, setEdits] = useState<Record<string, number>>({});
 
   const handleChange = (category: string, value: string) => {
-    setLocalConfigs((prev) =>
-      prev.map((c) =>
-        c.category === category ? { ...c, allotted_mins: parseInt(value) || 0 } : c
-      )
-    );
+    const parsed = parseInt(value);
+    setEdits((prev) => ({ ...prev, [category]: isNaN(parsed) ? 0 : parsed }));
   };
 
   const handleSave = () => {
-    updateConfig.mutate(localConfigs);
+    if (!configs) return;
+    const merged: CategoryConfig[] = configs.map((c) => ({
+      ...c,
+      allotted_mins: edits[c.category] ?? c.allotted_mins,
+    }));
+    updateConfig.mutate(merged, {
+      onSuccess: () => setEdits({}),
+    });
   };
+
+  // Merge server configs with unsaved edits for display
+  const displayConfigs: CategoryConfig[] = (configs ?? []).map((c) => ({
+    ...c,
+    allotted_mins: edits[c.category] ?? c.allotted_mins,
+  }));
 
   return (
     <div className="p-6 max-w-2xl mx-auto">
@@ -49,9 +56,9 @@ export function SettingsPage() {
           </div>
         )}
 
-        {localConfigs.length > 0 && (
+        {displayConfigs.length > 0 && (
           <div className="space-y-3">
-            {localConfigs.map((cfg) => (
+            {displayConfigs.map((cfg) => (
               <div key={cfg.category} className="flex items-center gap-4">
                 <span className="w-40 text-sm">
                   {CATEGORY_EMOJI[cfg.category]} {cfg.category.replace('_', ' ')}
@@ -59,12 +66,14 @@ export function SettingsPage() {
                 <input
                   type="number"
                   min={0}
-                  max={480}
+                  max={1440}
                   value={cfg.allotted_mins}
                   onChange={(e) => handleChange(cfg.category, e.target.value)}
                   className="w-24 px-3 py-1.5 border rounded-md text-sm text-right"
                 />
-                <span className="text-xs text-gray-500">min/day</span>
+                <span className="text-xs text-gray-500">
+                  min ({(cfg.allotted_mins / 60).toFixed(1)}h)
+                </span>
               </div>
             ))}
             <div className="pt-4">
@@ -80,7 +89,7 @@ export function SettingsPage() {
                 )}
                 {updateConfig.isPending ? 'Saving...' : 'Save'}
               </button>
-              {updateConfig.isSuccess && (
+              {updateConfig.isSuccess && Object.keys(edits).length === 0 && (
                 <span className="text-xs text-green-600 ml-3">Saved!</span>
               )}
               {updateConfig.isError && (
